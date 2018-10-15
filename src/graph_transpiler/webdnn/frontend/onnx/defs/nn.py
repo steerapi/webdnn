@@ -35,10 +35,10 @@ def _convert_average_pool(converter: ONNXConverter, onnx_op: INodeProto):
         pass
 
     else:
-        if any(pad[2 * i] != pad[2 * i + 1] for i in range(len(pad) // 2)):
-            raise NotImplementedError(
-                "[ONNXConverter] odd-size padding is not supported.")
-        pad = [pad[0], pad[2]]
+        # if any(pad[2 * i] != pad[2 * i + 1] for i in range(len(pad) // 2)):
+        #     raise NotImplementedError(
+        #         "[ONNXConverter] odd-size padding is not supported.")
+        pad = [pad[0], pad[1]]
 
     y, = AveragePooling2D(None, ksize=ksize, stride=stride,
                           padding=pad, cover_all=False)(x)
