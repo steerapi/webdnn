@@ -7,6 +7,9 @@ from webdnn.graph.operator import Operator
 from webdnn.graph.variable import Variable
 from webdnn.util import console
 
+import logging
+logger = logging.getLogger('graph_transpiler.webdnn.frontend.converter')
+
 T_OP = TypeVar('T_OP')
 
 Handler = Callable[["Converter", T_OP], Operator]
@@ -53,7 +56,8 @@ class Converter(Generic[T_OP]):
 
         def decorator(handler: Handler):
             if key in cls._handler_map[cls.__name__]:
-                console.warning(f"[{cls.__name__}] Converter Handler for '{key}' is already registered in {cls.__name__} and overwritten.")
+                console.warning(
+                    f"[{cls.__name__}] Converter Handler for '{key}' is already registered in {cls.__name__} and overwritten.")
 
             cls._handler_map[cls.__name__][key] = handler
             return handler
@@ -111,9 +115,12 @@ class Converter(Generic[T_OP]):
 
     def _convert_operator(self, operator: T_OP):
         operator_key = self.serialize_operator_type(operator)
+        logger.debug("Op {}".format(operator_key))
         if operator_key not in self._handler_map[self.__class__.__name__].keys():
-            raise NotImplementedError(f"Operator '{operator_key}' is not handled any converter handlers.")
+            raise NotImplementedError(
+                f"Operator '{operator_key}' is not handled any converter handlers.")
 
-        self._handler_map[self.__class__.__name__][operator_key](self, operator)
+        self._handler_map[self.__class__.__name__][operator_key](
+            self, operator)
 
         return None

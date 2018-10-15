@@ -12,6 +12,10 @@ from webdnn.graph.operators.sum import Sum
 from webdnn.graph.order import OrderC, OrderNCHW, Order
 from webdnn.util import console
 from webdnn.util.misc import mul
+from webdnn.graph.variables.constant_variable import ConstantVariable
+
+import logging
+logger = logging.getLogger('graph_transpiler.webdnn.frontend.onnx.defs.nn')
 
 
 @ONNXConverter.register_handler("AveragePool")
@@ -32,10 +36,12 @@ def _convert_average_pool(converter: ONNXConverter, onnx_op: INodeProto):
 
     else:
         if any(pad[2 * i] != pad[2 * i + 1] for i in range(len(pad) // 2)):
-            raise NotImplementedError("[ONNXConverter] odd-size padding is not supported.")
+            raise NotImplementedError(
+                "[ONNXConverter] odd-size padding is not supported.")
         pad = [pad[0], pad[2]]
 
-    y, = AveragePooling2D(None, ksize=ksize, stride=stride, padding=pad, cover_all=False)(x)
+    y, = AveragePooling2D(None, ksize=ksize, stride=stride,
+                          padding=pad, cover_all=False)(x)
     converter.set_variable(onnx_op.output[0], y)
 
 
@@ -56,16 +62,17 @@ def _convert_max_pool(converter: ONNXConverter, onnx_op: INodeProto):
         pass
 
     else:
-        if any(pad[2 * i] != pad[2 * i + 1] for i in range(len(pad) // 2)):
-            raise NotImplementedError("[ONNXConverter] odd-size padding is not supported.")
-        pad = [pad[0], pad[2]]
+        # if any(pad[2 * i] != pad[2 * i + 1] for i in range(len(pad) // 2)):
+        #     raise NotImplementedError("[ONNXConverter] odd-size padding is not supported.")
+        pad = [pad[0], pad[1]]
 
     # https://github.com/onnx/onnx/blob/master/docs/Operators.md
     # output_spatial_shape[i] = floor((input_spatial_shape[i] + pad_shape[i] - kernel_spatial_shape[i]) / strides_spatial_shape[i] + 1)
     # In PyTorch, nn.MaxPool2d(2) with input size 11 produces output size 5,
     # where kernel_shape=2, pads=0, strides=2 is set as onnx attributes.
     # It corresponds to cover_all=False.
-    y, = MaxPooling2D(None, ksize=ksize, stride=stride, padding=pad, cover_all=False)(x)
+    y, = MaxPooling2D(None, ksize=ksize, stride=stride,
+                      padding=pad, cover_all=False)(x)
     converter.set_variable(onnx_op.output[0], y)
 
 
@@ -83,11 +90,12 @@ def _convert_conv(converter: ONNXConverter, onnx_op: INodeProto):
     stride = list(attrs["strides"].ints)
 
     pad = list(attrs["pads"].ints)
-    if any(pad[2 * i] != pad[2 * i + 1] for i in range(len(pad) // 2)):
-        raise NotImplementedError("[ONNXConverter] odd-size padding is not supported.")
-    pad = [pad[0], pad[2]]
+    # if any(pad[2 * i] != pad[2 * i + 1] for i in range(len(pad) // 2)):
+    #     raise NotImplementedError("[ONNXConverter] odd-size padding is not supported.")
+    pad = [pad[0], pad[1]]
 
-    y, = Convolution2D(None, ksize=ksize, stride=stride, padding=pad, dilation_rate=dilations)(x, w)
+    y, = Convolution2D(None, ksize=ksize, stride=stride,
+                       padding=pad, dilation_rate=dilations)(x, w)
     y.change_order(OrderNCHW)
 
     if len(onnx_op.input) == 3:
@@ -102,7 +110,8 @@ def _convert_conv(converter: ONNXConverter, onnx_op: INodeProto):
 @ONNXConverter.register_handler("ConvTranspose")
 def _convert_conv_transpose(converter: ONNXConverter, onnx_op: INodeProto):
     # FIXME: It's possible to support in current version of webdnn
-    raise NotImplementedError("[ONNXConverter] Operator \"ConvTranspose\" is not supported yet.")
+    raise NotImplementedError(
+        "[ONNXConverter] Operator \"ConvTranspose\" is not supported yet.")
 
 
 @ONNXConverter.register_handler("GlobalAveragePool")
@@ -140,8 +149,38 @@ def _convert_global_max_pool(converter: ONNXConverter, onnx_op: INodeProto):
 
 @ONNXConverter.register_handler("BatchNormalization")
 def _convert_batch_normalization(converter: ONNXConverter, onnx_op: INodeProto):
-    # FIXME: It's possible to support in current version of webdnn
-    raise NotImplementedError("[ONNXConverter] Operator \"BatchNormalization\" is not supported yet.")
+    x = converter.get_variable(onnx_op.input[0])
+    x.order.axes[0].unify(Axis.N)
+    x.order.axes[1].unify(Axis.C)
+
+    gamma = converter.get_variable(onnx_op.input[1])
+    gamma.order.unify(OrderC)
+
+    beta = converter.get_variable(onnx_op.input[2])
+    beta.order.unify(OrderC)
+
+    attrs = attribute_dict(onnx_op)
+    eps = attrs["epsilon"].f
+
+    if len(onnx_op.input) == 5:
+        mean = converter.get_variable(onnx_op.input[3])
+        mean.order.unify(OrderC)
+
+        variance = converter.get_variable(onnx_op.input[4])
+        variance.order.unify(OrderC)
+
+    elif len(onnx_op.input) == 3:
+        mean = 0 if onnx_op.running_mean is None else ConstantVariable(
+            onnx_op.running_mean, OrderC)
+        variance = 1 if onnx_op.running_var is None else ConstantVariable(
+            onnx_op.running_var, OrderC)
+
+    else:
+        raise ValueError(
+            "Number of inputs to BatchNormalizationFunction must be 3 or 5.")
+
+    y = (x - mean) / ((variance + eps) ** 0.5) * gamma + beta
+    converter.set_variable(onnx_op.output[0], y)
 
 
 @ONNXConverter.register_handler("Dropout")
@@ -169,4 +208,5 @@ def _convert_flatten(converter: ONNXConverter, onnx_op: INodeProto):
 @ONNXConverter.register_handler("LRN")
 def _convert_lrn(converter: ONNXConverter, onnx_op: INodeProto):
     # FIXME: It's possible to support in current version of webdnn
-    raise NotImplementedError("[ONNXConverter] Operator \"LRN\" is not supported yet.")
+    raise NotImplementedError(
+        "[ONNXConverter] Operator \"LRN\" is not supported yet.")

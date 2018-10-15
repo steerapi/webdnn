@@ -25,3 +25,4 @@ example/neural_style_transfer_keras/neural-style-keras
 /src/descriptor_runner/**/*.js
 !/src/descriptor_runner/webpack.config.js
 !/src/descriptor_runner/webpack.config.es5.js
+.vscode
